@@ -100,7 +100,10 @@ class Table
 			ConnectionManager::drop_connection($connection);
 			static::clear_cache();
 		}
-		return ($this->conn = ConnectionManager::get_connection($connection));
+		$this->conn = ConnectionManager::get_connection($connection);
+		$class_name = get_class($this->class);
+		$this->conn->class = Reflections::instance()->add($class_name)->get($class_name);
+		return !!$this->conn;
 	}
 
 	public function create_joins($joins)
@@ -214,10 +217,19 @@ class Table
 		$this->last_sql = $sql;
 
 		$collect_attrs_for_includes = is_null($includes) ? false : true;
-		$list = $attrs = array();
-		$sth = $this->conn->query($sql,$this->process_data($values));
+		$rows = $list = $attrs = array();
 
-		while (($row = $sth->fetch()))
+		$closure = function() use($sql, $values) {
+			$sth = $this->conn->query($sql,$this->process_data($values));
+			return $sth->fetchAll();
+		}
+
+		if (!!$this->class->getStaticPropertyValue('enable_cache', null))
+			$rows = Cache::get($sql, $closure);
+		else
+			$rows = $closure();
+
+		foreach ($rows as $row)
 		{
 			$model = new $this->class->name($row,false,true,false);
 

@@ -48,6 +48,10 @@ abstract class Connection
 	 */
 	public $protocol;
 	/**
+	 * @var object
+	 */
+	public $class;
+	/**
 	 * Database's date format
 	 * @var string
 	 */
@@ -336,9 +340,16 @@ abstract class Connection
 	 */
 	public function query_and_fetch_one($sql, &$values=array())
 	{
-		$sth = $this->query($sql, $values);
-		$row = $sth->fetch(PDO::FETCH_NUM);
-		return $row[0];
+		$closure = function() use ($sql, $values) {
+			$sth = $this->query($sql, $values);
+			$row = $sth->fetch(PDO::FETCH_NUM);
+			return $row[0];
+		}
+
+		if (!!$this->class->getStaticPropertyValue('enable_cache', null))
+			return Cache::get($sql, $closure);
+		else
+			return $closure();
 	}
 
 	/**
