@@ -48,9 +48,9 @@ abstract class Connection
 	 */
 	public $protocol;
 	/**
-	 * @var object
+	 * @var int
 	 */
-	public $class;
+	public $transaction = 0;
 	/**
 	 * Database's date format
 	 * @var string
@@ -340,14 +340,17 @@ abstract class Connection
 	 */
 	public function query_and_fetch_one($sql, &$values=array())
 	{
-		$closure = function() use ($sql, $values) {
+		$closure = function() use($sql, &$values) {
 			$sth = $this->query($sql, $values);
 			$row = $sth->fetch(PDO::FETCH_NUM);
 			return $row[0];
-		}
+		};
 
-		if (!!$this->class->getStaticPropertyValue('enable_cache', null))
-			return Cache::get($sql, $closure);
+		if (Cache::is_enable_cache($sql))
+		{
+			$key = sha1($sql . serialize($values));
+			return Cache::get($key, $closure);
+		}
 		else
 			return $closure();
 	}
@@ -360,10 +363,26 @@ abstract class Connection
 	 */
 	public function query_and_fetch($sql, Closure $handler)
 	{
-		$sth = $this->query($sql);
+		if (Cache::is_enable_cache($sql))
+		{
+			$rows = array();
+			Cache::get($sql, function() use($sql, $handler, $rows) {
+				$sth = $this->query($sql);
+				
+				while (($rows[] = $sth->fetch(PDO::FETCH_ASSOC)));
 
-		while (($row = $sth->fetch(PDO::FETCH_ASSOC)))
-			$handler($row);
+				return $rows;
+			});
+			foreach ($rows as $row)
+				$handler($row);
+		}
+		else
+		{
+			$sth = $this->query($sql);
+	
+			while (($row = $sth->fetch(PDO::FETCH_ASSOC)))
+				$handler($row);
+		}
 	}
 
 	/**
@@ -387,8 +406,11 @@ abstract class Connection
 	 */
 	public function transaction()
 	{
-		if (!$this->connection->beginTransaction())
-			throw new DatabaseException($this);
+		if ($this->transaction++ === 0)
+		{
+			if (!$this->connection->beginTransaction())
+				throw new DatabaseException($this);
+		}
 	}
 
 	/**
@@ -396,8 +418,14 @@ abstract class Connection
 	 */
 	public function commit()
 	{
-		if (!$this->connection->commit())
-			throw new DatabaseException($this);
+		if ($this->transaction > 0)
+		{
+			if (--$this->transaction === 0)
+			{
+				if (!$this->connection->commit())
+					throw new DatabaseException($this);
+			}
+		}
 	}
 
 	/**
@@ -405,8 +433,12 @@ abstract class Connection
 	 */
 	public function rollback()
 	{
-		if (!$this->connection->rollback())
-			throw new DatabaseException($this);
+		if ($this->transaction > 0)
+		{
+			if (!$this->connection->rollback())
+				throw new DatabaseException($this);
+			$this->transaction = 0;
+		}
 	}
 
 	/**

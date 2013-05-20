@@ -12,6 +12,7 @@ class Cache
 {
 	static $adapter = null;
 	static $options = array();
+	static $cache_table = array();
 
 	/**
 	 * Initializes the cache.
@@ -39,16 +40,23 @@ class Cache
 	 */
 	public static function initialize($url, $options=array())
 	{
-		if ($url)
+		try
 		{
-			$url = parse_url($url);
-			$file = ucwords(Inflector::instance()->camelize($url['scheme']));
-			$class = "ActiveRecord\\$file";
-			require_once __DIR__ . "/cache/$file.php";
-			static::$adapter = new $class($url);
+			if ($url)
+			{
+				$url = parse_url($url);
+				$file = ucwords(Inflector::instance()->camelize($url['scheme']));
+				$class = "ActiveRecord\\$file";
+				require_once __DIR__ . "/cache/$file.php";
+				static::$adapter = new $class($url);
+			}
+			else
+				static::$adapter = null;
 		}
-		else
+		catch (CacheException $e)
+		{
 			static::$adapter = null;
+		}
 
 		static::$options = array_merge(array('expire' => 30, 'namespace' => ''),$options);
 	}
@@ -75,6 +83,29 @@ class Cache
 	private static function get_namespace()
 	{
 		return (isset(static::$options['namespace']) && strlen(static::$options['namespace']) > 0) ? (static::$options['namespace'] . "::") : "";
+	}
+
+	public static function set_cache($table)
+	{
+		static::$cache_table[$table] = true;
+	}
+
+	public static function is_enable_cache($sql)
+	{
+		$values = array();
+
+		if (preg_match('/.*\s*(FROM|INTO|UPDATE)\s+\`*(\w+\.)?(\w+)\`*.*/', $sql, $values))
+			return static::is_enable_cache_for_table($values[3]);
+
+		return false;
+	}
+
+	public static function is_enable_cache_for_table($table)
+	{
+		if (isset(static::$cache_table[$table]))
+			return static::$cache_table[$table];
+
+		return false;
 	}
 }
 ?>

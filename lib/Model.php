@@ -231,12 +231,6 @@ class Model
 	static $delegate = array();
 
 	/**
-	 *
-	 * @var boolean
-	 */
-	static $enable_cache = false;
-
-	/**
 	 * Constructs a model.
 	 *
 	 * When a user instantiates a new object (e.g.: it was not ActiveRecord that instantiated via a find)

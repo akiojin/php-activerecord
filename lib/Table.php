@@ -100,10 +100,7 @@ class Table
 			ConnectionManager::drop_connection($connection);
 			static::clear_cache();
 		}
-		$this->conn = ConnectionManager::get_connection($connection);
-		$class_name = get_class($this->class);
-		$this->conn->class = Reflections::instance()->add($class_name)->get($class_name);
-		return !!$this->conn;
+		return ($this->conn = ConnectionManager::get_connection($connection));
 	}
 
 	public function create_joins($joins)
@@ -214,38 +211,40 @@ class Table
 
 	public function find_by_sql($sql, $values=null, $readonly=false, $includes=null)
 	{
-		$this->last_sql = $sql;
+		$closure = function() use($sql, $values, $readonly, $includes) {
+			$this->last_sql = $sql;
 
-		$collect_attrs_for_includes = is_null($includes) ? false : true;
-		$rows = $list = $attrs = array();
+			$collect_attrs_for_includes = is_null($includes) ? false : true;
+			$list = $attrs = array();
 
-		$closure = function() use($sql, $values) {
 			$sth = $this->conn->query($sql,$this->process_data($values));
-			return $sth->fetchAll();
-		}
+	
+			while (($row = $sth->fetch()))
+			{
+				$model = new $this->class->name($row,false,true,false);
+	
+				if ($readonly)
+					$model->readonly();
+	
+				if ($collect_attrs_for_includes)
+					$attrs[] = $model->attributes();
+	
+				$list[] = $model;
+			}
+	
+			if ($collect_attrs_for_includes && !empty($list))
+				$this->execute_eager_load($list, $attrs, $includes);
 
-		if (!!$this->class->getStaticPropertyValue('enable_cache', null))
-			$rows = Cache::get($sql, $closure);
-		else
-			$rows = $closure();
+			return $list;
+		};
 
-		foreach ($rows as $row)
+		if (Cache::is_enable_cache_for_table($this->table))
 		{
-			$model = new $this->class->name($row,false,true,false);
-
-			if ($readonly)
-				$model->readonly();
-
-			if ($collect_attrs_for_includes)
-				$attrs[] = $model->attributes();
-
-			$list[] = $model;
+			$key = sha1($sql . serialize($values));
+			return Cache::get($key, $closure);
 		}
-
-		if ($collect_attrs_for_includes && !empty($list))
-			$this->execute_eager_load($list, $attrs, $includes);
-
-		return $list;
+		else
+			return $closure();
 	}
 
 	/**
